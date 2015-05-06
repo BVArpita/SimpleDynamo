@@ -27,21 +27,33 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.MatrixCursor;
+import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteException;
+import android.database.sqlite.SQLiteOpenHelper;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.telephony.TelephonyManager;
 import android.util.Log;
 
+
 public class SimpleDynamoProvider extends ContentProvider {
 
     static final String TAG =SimpleDynamoProvider.class.getSimpleName();
     static final int SERVER_PORT = 10000;
+    private SQLiteDatabase db;
+    static String DB_NAME="simpledynamo.db";
+    static int DB_VERSION=1;
+    private static DBHelper dbhelper;
+    public SQLiteDatabase writedb;
+    private static String DB_PATH="/data/data/edu.buffalo.cse.cse486586.simpledynamo/databases/simpledynamo.db";
     //MatrixCursor cursor=new MatrixCursor(new String[]{"key","value"} );
     String resultans="";
     final String  lowestport="11124";
+    boolean insertwait=false;
     final Object lock = new Object();
 
     List<String> listofhashnodes=new LinkedList<>();
+    ArrayList<String> portstrings= new ArrayList<String>();
     List<String> listofnodes=new LinkedList<>();
     HashMap<String ,List<String>> hm = new HashMap<>();
     MatrixCursor cursor_star =new MatrixCursor(new String[]{"key","value"} );
@@ -49,6 +61,35 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 
 
+   private static class DBHelper extends SQLiteOpenHelper{
+        DBHelper (Context context){
+
+            super(context, SimpleDynamoProvider.DB_NAME, null, SimpleDynamoProvider.DB_VERSION);
+            Log.d(TAG,"in constructor of db");
+        }
+
+        @Override
+        public void onCreate(SQLiteDatabase db) {
+            Log.d(TAG,"in oncreate of db");
+            String CHECK_STATUS="check_status";
+            String KEY="key";
+            String VALUE="value";
+            db.execSQL("CREATE TABLE "+ CHECK_STATUS +" ("+ KEY +" text primary key, "+ VALUE +" text not null);");
+        }
+       public void onUpgrade(SQLiteDatabase db,int a,int b){
+
+       }
+       public boolean isdb(){
+           try {
+               SQLiteDatabase isdb = null;
+               isdb = SQLiteDatabase.openDatabase(DB_PATH,null,SQLiteDatabase.OPEN_READONLY);
+               isdb.close();
+               return true;
+           }catch(SQLiteException s){
+               return false;
+           }
+       }
+    }
 
     public class Message  {
         String   msg;
@@ -127,7 +168,13 @@ public class SimpleDynamoProvider extends ContentProvider {
         if(predecessor.compareTo(keyid)<0 && keyid.compareTo(genHash(avd))<=0){
             Log.d(TAG,key+" "+"in local insert");
             writetofile(uri, values);
-            String emu_id=String.valueOf(Integer.parseInt(myport) / 2);
+
+            //send data to replicas
+            Message m1=new Message("repinsert",myport," ",key,val);
+            String msg=m1.toString();
+           sendtoreplicate(getport(), msg);
+
+           /* String emu_id=String.valueOf(Integer.parseInt(myport) / 2);
             String myport_suc1=hm.get(genHash(emu_id)).get(0);
             for(int i=0;i<portstrings.size();i++){
                 if(myport_suc1.equals(genHash(portstrings.get(i)))){
@@ -151,7 +198,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 
                 }
-            }
+            }*/
 
 
         }
@@ -160,7 +207,9 @@ public class SimpleDynamoProvider extends ContentProvider {
             Message m1=new Message("insert",myport,lowestport,key,val);
             String msg=m1.toString();
             Log.d(TAG,key+" "+"message being sent to spl partition");
-            new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,lowestport);
+           AsyncTask c= new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,lowestport);
+            return uri;
+
         }
         else  if(genHash("5554").compareTo(keyid)<0 && keyid.compareTo(genHash("5558"))<=0){
             String toport="11116";
@@ -168,6 +217,7 @@ public class SimpleDynamoProvider extends ContentProvider {
             Message m1=new Message("insert",myport,toport,key,val);
             String msg=m1.toString();
             new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
+            return uri;
         }
         else if(genHash("5558").compareTo(keyid)<0 && keyid.compareTo(genHash("5560"))<=0){
             String toport="11120";
@@ -175,6 +225,7 @@ public class SimpleDynamoProvider extends ContentProvider {
             Message m1=new Message("insert",myport,toport,key,val);
             String msg=m1.toString();
             new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
+            return uri;
         }
         else if(genHash("5560").compareTo(keyid)<0 && keyid.compareTo(genHash("5562"))<=0){
             String toport="11124";
@@ -182,6 +233,7 @@ public class SimpleDynamoProvider extends ContentProvider {
             Message m1=new Message("insert",myport,toport,key,val);
             String msg=m1.toString();
             new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
+            return uri;
         }
         else if(genHash("5562").compareTo(keyid)<0 && keyid.compareTo(genHash("5556"))<=0){
             String toport="11112";
@@ -189,6 +241,7 @@ public class SimpleDynamoProvider extends ContentProvider {
             Message m1=new Message("insert",myport,toport,key,val);
             String msg=m1.toString();
             new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
+            return uri;
         }
         else if(genHash("5556").compareTo(keyid)<0 && keyid.compareTo(genHash("5554"))<=0){
             String toport="11108";
@@ -196,12 +249,13 @@ public class SimpleDynamoProvider extends ContentProvider {
             Message m1=new Message("insert",myport,toport,key,val);
             String msg=m1.toString();
             new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
+            return uri;
         }
 
         } catch (NoSuchAlgorithmException e) {
             e.printStackTrace();
         }
-        return uri;
+        return null; //changed it to block insert
 	}
 
     public Uri writetofile(Uri uri,ContentValues values){
@@ -215,7 +269,7 @@ public class SimpleDynamoProvider extends ContentProvider {
                 try {
                     FileOutputStream fos =getContext().openFileOutput(key, Context.MODE_PRIVATE);
 
-
+                    Log.d(TAG,"updating key at"+getport()+f+" "+val);
                     fos.write(val.getBytes());
 
                     fos.close();
@@ -233,6 +287,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 
             fos.write(val.getBytes());
+            Log.d(TAG,"inserted value at"+getport()+key+" "+val);
 
             fos.close();
 
@@ -245,16 +300,27 @@ public class SimpleDynamoProvider extends ContentProvider {
         // Log.v("insert", values.toString());
     }
 
+
 	@Override
 	public boolean onCreate() {
         try {
             Log.d(TAG,"in oncreate");
-            Log.d(TAG,"number of nodes"+" "+listofhashnodes.size());
+
+
+            dbhelper=new DBHelper(getContext());
+            //db=dbhelper.getWritableDatabase();
+            Log.d(TAG,"number of nodes"+" "+listofhashnodes.size()+dbhelper.isdb());
             listofhashnodes.add(genHash("5554"));
             listofhashnodes.add(genHash("5556"));
             listofhashnodes.add(genHash("5558"));
             listofhashnodes.add(genHash("5560"));
             listofhashnodes.add(genHash("5562"));
+
+            portstrings.add("5554");
+            portstrings.add("5556");
+            portstrings.add("5558");
+            portstrings.add("5560");
+            portstrings.add("5562");
         } catch (NoSuchAlgorithmException e) {
             e.printStackTrace();
         }
@@ -262,6 +328,11 @@ public class SimpleDynamoProvider extends ContentProvider {
         try {
 
             addMembership(listofhashnodes);
+
+            /*String CHECK_STATUS="check_status";
+            String KEY="key";
+            String VALUE="value";
+            db.execSQL("CREATE TABLE"+CHECK_STATUS+"("+KEY+"text primary key,"+VALUE+"text not null);");*/
             ServerSocket serverSocket = new ServerSocket(SERVER_PORT);
             new ServerTask().executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, serverSocket);
 
@@ -304,18 +375,27 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 
         //adding predecessors
-        for(int j=4;j>0;j--){
-            String predecessor= listofhashnodes.get(j-1);
+        for(int j=4;j>1;j--){
+            String predecessor1= listofhashnodes.get(j - 1);
+            String predecessor2=listofhashnodes.get(j-2);
             List<String> pointerpr;
             //pointerpr.add(predecessor);
-            pointerpr=hm.get(listofhashnodes.get(j));
-            pointerpr.add(predecessor);
-            hm.put(listofhashnodes.get(j),pointerpr);
+            pointerpr=hm.get(listofhashnodes.get(j).toString());
+            pointerpr.add(predecessor1);
+            pointerpr.add(predecessor2);
+            hm.put(listofhashnodes.get(j).toString(), pointerpr);
         }
         List<String> pointerpr ;
-        pointerpr = hm.get(listofhashnodes.get(0));
+        pointerpr = hm.get(listofhashnodes.get(1));
+        pointerpr.add(listofhashnodes.get(0));
         pointerpr.add(listofhashnodes.get(4));
-        hm.put(listofhashnodes.get(0),pointerpr);
+        hm.put(listofhashnodes.get(1),pointerpr);
+
+        List<String> pointerpr1 ;
+        pointerpr1 = hm.get(listofhashnodes.get(0));
+        pointerpr1.add(listofhashnodes.get(4));
+        pointerpr1.add(listofhashnodes.get(3));
+        hm.put(listofhashnodes.get(0),pointerpr1);
 
         Log.d(TAG,"5554"+" "+hm.get(genHash("5554")));
         Log.d(TAG,"5556"+" "+hm.get(genHash("5556")));
@@ -323,28 +403,66 @@ public class SimpleDynamoProvider extends ContentProvider {
         Log.d(TAG,"5560"+" "+hm.get(genHash("5560")));
         Log.d(TAG,"5562"+" "+hm.get(genHash("5562")));
         String[] filelist=getContext().fileList();
-        if(filelist.length>0){
+        if(dbhelper.isdb()){
             Log.d(TAG,"revival of node");
             getfromsuccessors();
             getfrompredecessors();
+        }
+        else{
+            db=dbhelper.getWritableDatabase();
         }
 
 
     }
 
-    public void getfromsuccessors(){
-        String toport=hm.get(getport()).get(0);
+    public void getfromsuccessors() throws NoSuchAlgorithmException {
+        String emu_id=String.valueOf(Integer.parseInt(getport()) / 2);
+        String successor1=hm.get(genHash(emu_id)).get(0);
         String amport=getport();
-        String message="getdataafterfailure";
-        Message m1=new Message(message,amport,toport," "," ");
-        String msg=m1.toString();
+        String message="getowndata";
+        //Message m1=new Message(message,amport,successor1," "," ");
+        //String msg=m1.toString();
+        for(int i=0;i<portstrings.size();i++) {
+            if (successor1.equals(genHash(portstrings.get(i)))) {
+                String toport = Integer.toString(Integer.parseInt(portstrings.get(i)) * 2);
+                Message m1 = new Message(message, amport, toport, " "," ");
+                String msg = m1.toString();
+                new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg, toport);
 
-        new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
+
+            }
+        }
+
+
 
     }
 
-    public void getfrompredecessors(){
+    public void getfrompredecessors() throws NoSuchAlgorithmException {
+        String emu_id=String.valueOf(Integer.parseInt(getport()) / 2);
+        String predecessor1=hm.get(genHash(emu_id)).get(2);
+        String predecessor2=hm.get(genHash(emu_id)).get(3);
+        String amport=getport();
+        String message="getreplicatedata";
 
+        for(int i=0;i<portstrings.size();i++) {
+            if (predecessor1.equals(genHash(portstrings.get(i)))) {
+                String toport = Integer.toString(Integer.parseInt(portstrings.get(i)) * 2);
+                Message m1 = new Message(message, amport, toport, " "," ");
+                String msg = m1.toString();
+                new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg, toport);
+
+
+            }
+            if (predecessor2.equals(genHash(portstrings.get(i)))) {
+                String toport = Integer.toString(Integer.parseInt(portstrings.get(i)) * 2);
+                Message m1 = new Message(message, amport, toport, " "," ");
+                String msg = m1.toString();
+                new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg, toport);
+
+
+            }
+
+        }
     }
 
 	@Override
@@ -664,6 +782,37 @@ public class SimpleDynamoProvider extends ContentProvider {
 		return 0;
 	}
 
+    public void sendtoreplicate(String coordinator,String message) throws NoSuchAlgorithmException {
+        String emu_id=String.valueOf(Integer.parseInt(coordinator) / 2);
+        String myport_suc1=hm.get(genHash(emu_id)).get(0);
+        String[] msgarr=message.split("-");
+        String key=msgarr[3];
+        String value=msgarr[4];
+        for(int i=0;i<portstrings.size();i++){
+            if(myport_suc1.equals(genHash(portstrings.get(i)))){
+                String toport = Integer.toString(Integer.parseInt(portstrings.get(i))*2);
+                Message m1=new Message("repinsert",getport(),toport,key,value);
+                String msg=m1.toString();
+                new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
+
+
+            }
+        }
+
+        String myport_suc2=hm.get(genHash(emu_id)).get(1);
+        for(int i=0;i<portstrings.size();i++){
+            if(myport_suc2.equals(genHash(portstrings.get(i)))){
+                String toport = Integer.toString(Integer.parseInt(portstrings.get(i))*2);
+                Message m1=new Message("repinsert",getport(),toport,key,value);
+                String msg=m1.toString();
+                new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
+
+
+            }
+        }
+
+    }
+
     private class ClientTask extends AsyncTask<String, Void, Void> {
         protected Void doInBackground(String... m1) {
             try {
@@ -681,14 +830,15 @@ public class SimpleDynamoProvider extends ContentProvider {
                     BufferedReader br = new BufferedReader(new InputStreamReader(socket0.getInputStream()));
                     String recieveddata = br.readLine();
                     if(recieveddata == null){
-                        Log.d(TAG,"failed port"+" "+m1[1]);
+                        Log.d(TAG,"failed port while inserting key "+ m1[0]+" "+m1[1]);
+                        sendtoreplicate(m1[1], m1[0]);
                     }
                     else {
                         // if (recieveddata != null) {
                         String[] msgarray = recieveddata.split("-");
                         String msg = msgarray[0];
                         if (msg.equals("ackforinsert")) {
-                            Log.d(TAG, "ack recieved from" + " " + msgarray[1]);
+                            Log.d(TAG, "ack recieved for "+m1[0] + " from " + msgarray[1]);
                         }
                     }
                    // }
@@ -710,6 +860,8 @@ public class SimpleDynamoProvider extends ContentProvider {
                 Log.e(TAG, "ClientTask UnknownHostException");
             } catch (IOException e) {
                 Log.e(TAG, "ClientTask socket IOException");
+                e.printStackTrace();
+            } catch (NoSuchAlgorithmException e) {
                 e.printStackTrace();
             }
 
@@ -823,8 +975,38 @@ public class SimpleDynamoProvider extends ContentProvider {
                         String value=msgarray[4];
                         cursor_star.addRow(new Object[]{key, value});
                     }
-                    else if(msg.equals("ackforinsert")){
+                  /*  else if(msg.equals("ackforinsert")){
                         Log.d(TAG,"ack recieved at"+" "+getport()+"from "+" "+msgarray[1]);
+                    }*/
+                    else if(msg.equals("getowndata")){
+                        String coordinator=msgarray[1];
+                        boolean splcase=false;
+                        String emu_id=String.valueOf(Integer.parseInt(getport()) / 2);
+                        String predecessor=hm.get(genHash(emu_id)).get(3);
+                        String successor=hm.get(genHash(emu_id)).get(2);
+                        if(coordinator.equals("11124")){
+                            splcase=true;
+                        }
+                        sendcoordinatorsdata(successor,predecessor,coordinator,splcase);
+                    }
+                    else if(msg.equals("getreplicatedata")){
+                        String coordinator=msgarray[1];
+                        boolean splcase=false;
+                        String emu_id=String.valueOf(Integer.parseInt(getport()) / 2);
+                        String predecessor=hm.get(genHash(emu_id)).get(2);
+                        String successor=genHash(emu_id);
+                        if (getport().equals("11124")){
+                            splcase=true;
+                        }
+                        sendcoordinatorsdata(successor,predecessor,coordinator,splcase);
+                    }
+                    else if(msg.equals("coordinatorsdata")){
+                        ContentValues val =new ContentValues();
+                        String key=msgarray[3];
+                        String value=msgarray[4];
+                        val.put("key",key);
+                        val.put("value", value);
+                        writetofile(amUri,val);
                     }
 
 
@@ -838,6 +1020,70 @@ public class SimpleDynamoProvider extends ContentProvider {
             }
 
         }
+    }
+
+    public void sendcoordinatorsdata(String successor,String predecessor,String coordinator,boolean splcase) throws NoSuchAlgorithmException {
+        String[] filelist=getContext().fileList();
+        String highid=Collections.max(listofhashnodes);
+        String lowid=Collections.min(listofhashnodes);
+        for(String f : filelist){
+            if((predecessor.compareTo(genHash(f))<0 && genHash(f).compareTo(successor)<=0) ){
+                try{                                //Reference from http://stackoverflow.com/questions/14768191/how-do-i-read-the-file-content-from-the-internal-storage-android-app
+
+                    FileInputStream fis = getContext().openFileInput(f);
+                    InputStreamReader isr = new InputStreamReader(fis);
+                    BufferedReader bufferedReader = new BufferedReader(isr);
+                    StringBuilder sb = new StringBuilder();
+                    String line="";
+                    //to debug
+
+
+                    while ((line = bufferedReader.readLine()) != null) {
+                        sb.append(line);
+                    }
+                    //Log.d("Value of line",line);
+                    //MatrixCursor cursor=new MatrixCursor(new String[]{"key","value"} );
+                    //cursor.addRow(new Object[] { f, sb.toString() });
+                    //return cursor;
+                    String toport=coordinator;
+                    Message m1=new Message("coordinatorsdata",getport(),coordinator,f,sb.toString());
+                    String message=m1.toString();
+                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, message,toport);
+
+                }
+                catch(IOException e){
+                    Log.e(TAG, "Unable to read from file");
+                }
+            }
+         if((genHash(f).compareTo(highid) >0 || genHash(f).compareTo(lowid) <0) && splcase){
+                try{                                //Reference from http://stackoverflow.com/questions/14768191/how-do-i-read-the-file-content-from-the-internal-storage-android-app
+
+                    FileInputStream fis = getContext().openFileInput(f);
+                    InputStreamReader isr = new InputStreamReader(fis);
+                    BufferedReader bufferedReader = new BufferedReader(isr);
+                    StringBuilder sb = new StringBuilder();
+                    String line="";
+                    //to debug
+
+
+                    while ((line = bufferedReader.readLine()) != null) {
+                        sb.append(line);
+                    }
+
+                    String toport=coordinator;
+                    Message m1=new Message("coordinatorsdata",getport(),coordinator,f,sb.toString());
+                    String message=m1.toString();
+                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, message,toport);
+
+                }
+                catch(IOException e){
+                    Log.e(TAG, "Unable to read from file");
+                }
+
+            }
+        }
+
+       // return null;
     }
 
 
