@@ -11,6 +11,7 @@ import java.io.Serializable;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -116,16 +117,76 @@ public class SimpleDynamoProvider extends ContentProvider {
     @Override
 	public int delete(Uri uri, String selection, String[] selectionArgs) {
 
-		return deletelocal(selection);
-	}
+        try {
+            return deletelocal(selection);
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
 
-    public int deletelocal(String selection){
+        } catch (UnknownHostException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return 0;//check this
+    }
+
+    public int deletelocal(String selection) throws NoSuchAlgorithmException, IOException {
         Integer delrows=0;
         boolean isdeleted=false;
+        //String originator=getport();
+        String emu_id=String.valueOf(Integer.parseInt(getport()) / 2);
+        String successor=hm.get(genHash(emu_id)).get(0);
+        String predecessor1=hm.get(genHash(emu_id)).get(2);
+        String predecessor2=hm.get(genHash(emu_id)).get(3);
+
         String[] filelist=getContext().fileList();
         for(String f : filelist){
             if(f.equals(selection)){
                 isdeleted=getContext().deleteFile(f);
+                Log.d(TAG,"sending delete of"+" "+f+" "+successor+" "+predecessor1+" "+predecessor2);
+                for(int i=0;i<portstrings.size();i++) {
+                    if (successor.equals(genHash(portstrings.get(i)))) {
+                        String toport = Integer.toString(Integer.parseInt(portstrings.get(i)) * 2);
+                        Socket socket0 = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                                Integer.parseInt(toport));
+                        Message m1=new Message("delete",getport(),toport,f," ");
+                        String msg=m1.toString();
+                        PrintWriter out = null;
+
+                        out = new PrintWriter(socket0.getOutputStream(), true);
+
+                        out.println(msg);
+                    }
+
+                    if (predecessor1.equals(genHash(portstrings.get(i)))) {
+                        String toport = Integer.toString(Integer.parseInt(portstrings.get(i)) * 2);
+                        Socket socket1 = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                                Integer.parseInt(toport));
+                        Message m1=new Message("delete",getport(),toport,f," ");
+                        String msg=m1.toString();
+                        PrintWriter out = null;
+
+                        out = new PrintWriter(socket1.getOutputStream(), true);
+
+                        out.println(msg);
+                    }
+
+                    if (predecessor2.equals(genHash(portstrings.get(i)))) {
+                        String toport = Integer.toString(Integer.parseInt(portstrings.get(i)) * 2);
+                        Socket socket2 = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                                Integer.parseInt(toport));
+                        Message m1=new Message("delete",getport(),toport,f," ");
+                        String msg=m1.toString();
+                        PrintWriter out = null;
+
+                        out = new PrintWriter(socket2.getOutputStream(), true);
+
+                        out.println(msg);
+                    }
+
+
+
+
             }
 
         }
@@ -134,6 +195,8 @@ public class SimpleDynamoProvider extends ContentProvider {
             Log.d(TAG,"deleted key"+" "+selection);
             Log.d(TAG,getContext().fileList().length+" "+"filelist");
         }
+       // return delrows;
+    }
         return delrows;
     }
 
@@ -207,8 +270,34 @@ public class SimpleDynamoProvider extends ContentProvider {
             Message m1=new Message("insert",myport,lowestport,key,val);
             String msg=m1.toString();
             Log.d(TAG,key+" "+"message being sent to spl partition");
-           AsyncTask c= new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,lowestport);
-            return uri;
+
+            Socket socket0 = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                    Integer.parseInt(lowestport));
+            socket0.setSoTimeout(2500);
+            Log.d(TAG, "at clienttask for insert");
+            PrintWriter out = new PrintWriter(socket0.getOutputStream(), true);
+            out.println(msg);
+            Log.d(TAG, "msg sent to" + " " + lowestport + " " + msg);
+
+            BufferedReader br = new BufferedReader(new InputStreamReader(socket0.getInputStream()));
+            String recieveddata = br.readLine();
+            if(recieveddata == null){
+                Log.d(TAG,"failed port while inserting key "+ msg+" "+lowestport);
+                sendtoreplicate(lowestport, msg);
+            }
+            else {
+                // if (recieveddata != null) {
+                String[] msgarray = recieveddata.split("-");
+                String message = msgarray[0];
+                if (message.equals("ackforinsert")) {
+                    Log.d(TAG, "ack recieved for "+msg + " from " + msgarray[1]);
+                    return uri;
+                }
+            }
+            // }
+            socket0.close();
+           //AsyncTask c= new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,lowestport);
+
 
         }
         else  if(genHash("5554").compareTo(keyid)<0 && keyid.compareTo(genHash("5558"))<=0){
@@ -216,52 +305,195 @@ public class SimpleDynamoProvider extends ContentProvider {
             Log.d(TAG,key+" "+" sent to 5558");
             Message m1=new Message("insert",myport,toport,key,val);
             String msg=m1.toString();
-            new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
-            return uri;
+
+            Socket socket0 = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                    Integer.parseInt(toport));
+            socket0.setSoTimeout(2500);
+            Log.d(TAG, "at clienttask for insert");
+            PrintWriter out = new PrintWriter(socket0.getOutputStream(), true);
+            out.println(msg);
+            Log.d(TAG, "msg sent to" + " " + toport + " " + msg);
+
+            BufferedReader br = new BufferedReader(new InputStreamReader(socket0.getInputStream()));
+            String recieveddata = br.readLine();
+            if(recieveddata == null){
+                Log.d(TAG,"failed port while inserting key "+ msg+" "+lowestport);
+                sendtoreplicate(toport, msg);
+            }
+            else {
+                // if (recieveddata != null) {
+                String[] msgarray = recieveddata.split("-");
+                String message = msgarray[0];
+                if (message.equals("ackforinsert")) {
+                    Log.d(TAG, "ack recieved for "+msg + " from " + msgarray[1]);
+                    return uri;
+                }
+            }
+            // }
+            socket0.close();
+            //new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
+            //return uri;
         }
         else if(genHash("5558").compareTo(keyid)<0 && keyid.compareTo(genHash("5560"))<=0){
             String toport="11120";
             Log.d(TAG,key+" "+" sent to 5560");
             Message m1=new Message("insert",myport,toport,key,val);
             String msg=m1.toString();
-            new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
-            return uri;
+
+            Socket socket0 = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                    Integer.parseInt(toport));
+            socket0.setSoTimeout(2500);
+            Log.d(TAG, "at clienttask for insert");
+            PrintWriter out = new PrintWriter(socket0.getOutputStream(), true);
+            out.println(msg);
+            Log.d(TAG, "msg sent to" + " " + toport + " " + msg);
+
+            BufferedReader br = new BufferedReader(new InputStreamReader(socket0.getInputStream()));
+            String recieveddata = br.readLine();
+            if(recieveddata == null){
+                Log.d(TAG,"failed port while inserting key "+ msg+" "+lowestport);
+                sendtoreplicate(toport, msg);
+            }
+            else {
+                // if (recieveddata != null) {
+                String[] msgarray = recieveddata.split("-");
+                String message = msgarray[0];
+                if (message.equals("ackforinsert")) {
+                    Log.d(TAG, "ack recieved for "+msg + " from " + msgarray[1]);
+                    return uri;
+                }
+            }
+            // }
+            socket0.close();
+            //new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
+           // return uri;
         }
         else if(genHash("5560").compareTo(keyid)<0 && keyid.compareTo(genHash("5562"))<=0){
             String toport="11124";
             Log.d(TAG,key+" "+" sent to 5562");
             Message m1=new Message("insert",myport,toport,key,val);
             String msg=m1.toString();
-            new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
-            return uri;
+
+            Socket socket0 = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                    Integer.parseInt(toport));
+            socket0.setSoTimeout(2500);
+            Log.d(TAG, "at clienttask for insert");
+            PrintWriter out = new PrintWriter(socket0.getOutputStream(), true);
+            out.println(msg);
+            Log.d(TAG, "msg sent to" + " " + toport + " " + msg);
+
+            BufferedReader br = new BufferedReader(new InputStreamReader(socket0.getInputStream()));
+            String recieveddata = br.readLine();
+            if(recieveddata == null){
+                Log.d(TAG,"failed port while inserting key "+ msg+" "+lowestport);
+                sendtoreplicate(toport, msg);
+            }
+            else {
+                // if (recieveddata != null) {
+                String[] msgarray = recieveddata.split("-");
+                String message = msgarray[0];
+                if (message.equals("ackforinsert")) {
+                    Log.d(TAG, "ack recieved for "+msg + " from " + msgarray[1]);
+                    return uri;
+                }
+            }
+            // }
+            socket0.close();
+           // new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
+           // return uri;
         }
         else if(genHash("5562").compareTo(keyid)<0 && keyid.compareTo(genHash("5556"))<=0){
             String toport="11112";
             Log.d(TAG,key+" "+" sent to 5556");
             Message m1=new Message("insert",myport,toport,key,val);
             String msg=m1.toString();
-            new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
-            return uri;
+
+            Socket socket0 = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                    Integer.parseInt(toport));
+            socket0.setSoTimeout(2500);
+            Log.d(TAG, "at clienttask for insert");
+            PrintWriter out = new PrintWriter(socket0.getOutputStream(), true);
+            out.println(msg);
+            Log.d(TAG, "msg sent to" + " " + toport + " " + msg);
+
+            BufferedReader br = new BufferedReader(new InputStreamReader(socket0.getInputStream()));
+            String recieveddata = br.readLine();
+            if(recieveddata == null){
+                Log.d(TAG,"failed port while inserting key "+ msg+" "+lowestport);
+                sendtoreplicate(toport, msg);
+            }
+            else {
+                // if (recieveddata != null) {
+                String[] msgarray = recieveddata.split("-");
+                String message = msgarray[0];
+                if (message.equals("ackforinsert")) {
+                    Log.d(TAG, "ack recieved for "+msg + " from " + msgarray[1]);
+                    return uri;
+                }
+            }
+            // }
+            socket0.close();
+            //new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
+            //return uri;
         }
         else if(genHash("5556").compareTo(keyid)<0 && keyid.compareTo(genHash("5554"))<=0){
             String toport="11108";
             Log.d(TAG,key+" "+" sent to 5554");
             Message m1=new Message("insert",myport,toport,key,val);
             String msg=m1.toString();
-            new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
-            return uri;
+
+            Socket socket0 = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                    Integer.parseInt(toport));
+            socket0.setSoTimeout(2500);
+            Log.d(TAG, "at clienttask for insert");
+            PrintWriter out = new PrintWriter(socket0.getOutputStream(), true);
+            out.println(msg);
+            Log.d(TAG, "msg sent to" + " " + toport + " " + msg);
+
+            BufferedReader br = new BufferedReader(new InputStreamReader(socket0.getInputStream()));
+            String recieveddata = br.readLine();
+            if(recieveddata == null){
+                Log.d(TAG,"failed port while inserting key "+ msg+" "+lowestport);
+                sendtoreplicate(toport, msg);
+            }
+            else {
+                // if (recieveddata != null) {
+                String[] msgarray = recieveddata.split("-");
+                String message = msgarray[0];
+                if (message.equals("ackforinsert")) {
+                    Log.d(TAG, "ack recieved for "+msg + " from " + msgarray[1]);
+                    return uri;
+                }
+            }
+            // }
+            socket0.close();
+            //new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg,toport);
+            //return uri;
         }
 
         } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        } catch (UnknownHostException e) {
+            e.printStackTrace();
+        } catch (SocketException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
             e.printStackTrace();
         }
         return null; //changed it to block insert
 	}
 
-    public Uri writetofile(Uri uri,ContentValues values){
+    public Uri writetofile(Uri uri,ContentValues values) throws NoSuchAlgorithmException {
         String[] filelist=getContext().fileList();
         String key= values.getAsString("key");
         String val=values.getAsString("value");
+        String emu_id=String.valueOf(Integer.parseInt(getport()) / 2);
+        String successor=genHash(emu_id);
+        String predecessor=hm.get(genHash(emu_id)).get(2);
+        Message m1=new Message(" ",getport()," ",key,val);
+        String msg=m1.toString();
+        String highid=Collections.max(listofhashnodes);
+        String lowid=Collections.min(listofhashnodes);
         //Log.d(TAG,"in insert"+" "+dht+" "+portstring);
 
         for(String f : filelist) { //to check if file with key name already exists and if so , update value.
@@ -274,6 +506,15 @@ public class SimpleDynamoProvider extends ContentProvider {
 
                     fos.close();
 
+                    //update is being made to coordinator node. so replicate the change appropriately
+                   if(predecessor.compareTo(genHash(key))<0 && (genHash(key).compareTo(successor))<=0){
+                       sendtoreplicate(getport(),msg);
+                       Log.d(TAG,"send to replicate after update"+" "+msg);
+                   }
+                   if((genHash(key).compareTo(highid) >0 || genHash(key).compareTo(lowid) <0) && getport().equals("11124")){
+                       sendtoreplicate(getport(),msg);
+                       Log.d(TAG,"send to replicate after update"+" "+msg);
+                   }
                     return uri;
                 }
                 catch(IOException e){
@@ -403,7 +644,7 @@ public class SimpleDynamoProvider extends ContentProvider {
         Log.d(TAG,"5560"+" "+hm.get(genHash("5560")));
         Log.d(TAG,"5562"+" "+hm.get(genHash("5562")));
         String[] filelist=getContext().fileList();
-        if(dbhelper.isdb()){
+        if(dbhelper.isdb() ){
             Log.d(TAG,"revival of node");
             getfromsuccessors();
             getfrompredecessors();
@@ -482,6 +723,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 
         if(selection.equals( "\"@\"")){
+            Log.d(TAG,"in query method for @");
             String[] filelist=getContext().fileList();
             for(String f : filelist){
 
@@ -512,18 +754,50 @@ public class SimpleDynamoProvider extends ContentProvider {
             return cursor_local;
         }
 
-        else if(selection.equals( "\"*\"")){
-            for(int i=0;i<5;i++) {
-                String toport=Integer.toString(Integer.parseInt(listofnodes.get(i))*2);
-                Message m1=new Message("star",myport,toport,"*","");
-                String msg=m1.toString();
-                AsyncTask c=new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg, toport);
+        else if(selection.equals( "\"*\"")) {
+            Log.d(TAG, "in query method for *");
+            for (int i = 0; i < 5; i++) {
+                String toport = Integer.toString(Integer.parseInt(listofnodes.get(i)) * 2);
+                if (!toport.equals(getport())) {
+                    Message m1 = new Message("star", myport, toport, "*", "");
+                    String msg = m1.toString();
+                    AsyncTask c = new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg, toport);
 
-                synchronized (c){
-                    c.wait(500);
+                    synchronized (c) {
+                        c.wait(500);
+                    }
                 }
-            }
+                if (toport.equals(getport())) {
+                    String[] filelist=getContext().fileList();
+                    for(String f : filelist){
+                        try {
+                            //Reference from http://stackoverflow.com/questions/14768191/how-do-i-read-the-file-content-from-the-internal-storage-android-app
+                            //String path=getContextt
+                            FileInputStream fis = getContext().openFileInput(f);
+                            InputStreamReader isr = new InputStreamReader(fis);
+                            BufferedReader bufferedReader = new BufferedReader(isr);
+                            StringBuilder sb = new StringBuilder();
+                            String line = "";
+                            //to debug
 
+
+                            while ((line = bufferedReader.readLine()) != null) {
+                                sb.append(line);
+                            }
+                            cursor_star.addRow(new Object[]{f, sb.toString()});
+                            //return cursor;
+                        }catch(IOException e){
+                            Log.e(TAG, "Unable to read from file");
+                        }
+
+
+
+                }
+
+
+                 }
+
+            }
             return cursor_star;
         }
         //local query
@@ -844,14 +1118,94 @@ public class SimpleDynamoProvider extends ContentProvider {
                    // }
                     socket0.close();
                 }
+                else if(message.equals("query")){
+                    Socket socket0 = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                            Integer.parseInt(m1[1]));
+                    socket0.setSoTimeout(3000);
+                   // Log.d(TAG, "at clienttask from sendtooriginator");
+                    PrintWriter out = new PrintWriter(socket0.getOutputStream(), true);
+                    out.println(m1[0]);
+                   // out.close();
+                    Log.d(TAG, "msg sent to" + " " + m1[1] + " " + m1[0]);
+
+                    BufferedReader br = new BufferedReader(new InputStreamReader(socket0.getInputStream()));
+                    String recieveddata = br.readLine();
+
+                    if(recieveddata!=null) {
+                        // if (recieveddata != null) {
+                        String[] msgarray = recieveddata.split("-");
+                        String msg = msgarray[0];
+                        if (msg.equals("ans")) {
+                            resultans = msgarray[4];
+                            Log.d(TAG, "query ans recieved for "+m1[0] + " from " + msgarray[1]);
+                        }
+                        socket0.close();
+                    }
+
+                    else if(recieveddata == null){
+                        Log.d(TAG,"failed port while querying key "+ m1[0]+" at "+m1[1]);
+                        String toport="";
+
+                        //query sent to successor
+                        String emu_id=String.valueOf(Integer.parseInt(m1[1]) / 2);
+                        String successor=hm.get(genHash(emu_id)).get(0);
+                        for(int i=0;i<portstrings.size();i++) {
+                            if (successor.equals(genHash(portstrings.get(i)))) {
+                                toport = Integer.toString(Integer.parseInt(portstrings.get(i)) * 2);
+                                Socket socket1 = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                                        Integer.parseInt(toport));
+                                PrintWriter out1 = new PrintWriter(socket1.getOutputStream(), true);
+                                out1.println(m1[0]);
+                                //out1.close();
+                                Log.d(TAG, "msg sent to" + " " + toport + " " + m1[0]);
+                                //recieveing ans from successor for query
+                                BufferedReader br1 = new BufferedReader(new InputStreamReader(socket1.getInputStream()));
+                                String recieveddata1 = br1.readLine();
+                                if(recieveddata1!=null) {
+                                    String[] msgarray = recieveddata1.split("-");
+                                    String msg = msgarray[0];
+                                    if (msg.equals("ans")) {
+                                        resultans = msgarray[4];
+                                        Log.d(TAG, "query ans recieved for " + m1[0] + " from " + msgarray[1]);
+                                    }
+                                }
+
+                            }
+                        }
+                      /*  BufferedReader br1 = new BufferedReader(new InputStreamReader(socket1.getInputStream()));
+                        String recieveddata1 = br1.readLine();
+                        if(recieveddata1!=null) {
+                            String[] msgarray = recieveddata.split("-");
+                            String msg = msgarray[0];
+                            if (msg.equals("ans")) {
+                                resultans = msgarray[4];
+                                Log.d(TAG, "query ans recieved for " + m1[0] + " from " + msgarray[1]);
+                            }
+                        }*/
+
+
+                    }
+                   /* else {
+                        // if (recieveddata != null) {
+                        String[] msgarray = recieveddata.split("-");
+                        String msg = msgarray[0];
+                        if (msg.equals("ans")) {
+                            resultans = msgarray[4];
+                            Log.d(TAG, "query ans recieved for "+m1[0] + " from " + msgarray[1]);
+                        }
+                    }*/
+
+                   //socket0.close();
+                }
                 else{
                     Socket socket0 = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
                             Integer.parseInt(m1[1]));
                     socket0.setSoTimeout(2500);
-                   // Log.d(TAG, "at clienttask from sendtooriginator");
+                    // Log.d(TAG, "at clienttask from sendtooriginator");
                     PrintWriter out = new PrintWriter(socket0.getOutputStream(), true);
                     out.println(m1[0]);
                     Log.d(TAG, "msg sent to" + " " + m1[1] + " " + m1[0]);
+
                     socket0.close();
                 }
 
@@ -952,12 +1306,16 @@ public class SimpleDynamoProvider extends ContentProvider {
                         writetofile(amUri,val);
                     }
                     else if(msg.equals("query")){
+                        PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
                         Log.d(TAG,"in query of server"+getport());
                         String selection=msgarray[3];
                         String ans=localquery(selection);
                         String originator=msgarray[1];
                         Log.d(TAG,"query result found at"+getport()+" "+ans);
-                        sendtooriginator(ans,originator);
+                        //PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
+                        out.println("ans-"+getport()+"-"+originator+"-"+selection+"-"+ans);
+                        out.close();
+                        //sendtooriginator(ans,originator);
                     }
                     else if(msg.equals("ans")){
                         //final Object lock = new Object();
@@ -1007,6 +1365,11 @@ public class SimpleDynamoProvider extends ContentProvider {
                         val.put("key",key);
                         val.put("value", value);
                         writetofile(amUri,val);
+                    }
+                    else if(msg.equals("delete")){
+                        String key=msgarray[3];
+                        Log.d(TAG,"in server to delete"+" "+key+" "+getport());
+                        deletelocal(key);
                     }
 
 
@@ -1081,6 +1444,8 @@ public class SimpleDynamoProvider extends ContentProvider {
                 }
 
             }
+
+
         }
 
        // return null;
