@@ -1214,6 +1214,42 @@ public class SimpleDynamoProvider extends ContentProvider {
                 Log.e(TAG, "ClientTask UnknownHostException");
             } catch (IOException e) {
                 Log.e(TAG, "ClientTask socket IOException");
+
+                String toport="";
+                String emu_id=String.valueOf(Integer.parseInt(m1[1]) / 2);
+                String successor= null;
+                try {
+                    successor = hm.get(genHash(emu_id)).get(0);
+
+                for(int i=0;i<portstrings.size();i++) {
+                    if (successor.equals(genHash(portstrings.get(i)))) {
+                        toport = Integer.toString(Integer.parseInt(portstrings.get(i)) * 2);
+                        Socket socket1 = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                                Integer.parseInt(toport));
+                        PrintWriter out1 = new PrintWriter(socket1.getOutputStream(), true);
+                        out1.println(m1[0]);
+                        //out1.close();
+                        Log.d(TAG, "msg sent to" + " " + toport + " " + m1[0]);
+                        //recieveing ans from successor for query
+                        BufferedReader br1 = new BufferedReader(new InputStreamReader(socket1.getInputStream()));
+                        String recieveddata1 = br1.readLine();
+                        if(recieveddata1!=null) {
+                            String[] msgarray = recieveddata1.split("-");
+                            String msg = msgarray[0];
+                            if (msg.equals("ans")) {
+                                resultans = msgarray[4];
+                                Log.d(TAG, "query ans recieved for " + m1[0] + " from " + msgarray[1]);
+                            }
+                        }
+
+                    }
+                } } catch (NoSuchAlgorithmException e1) {
+                    e1.printStackTrace();
+                }catch (UnknownHostException e1) {
+                    Log.e(TAG, "ClientTask UnknownHostException");
+                }catch (IOException e1) {
+                    Log.e(TAG, "ClientTask socket IOException");}
+
                 e.printStackTrace();
             } catch (NoSuchAlgorithmException e) {
                 e.printStackTrace();
@@ -1342,10 +1378,14 @@ public class SimpleDynamoProvider extends ContentProvider {
                         String emu_id=String.valueOf(Integer.parseInt(getport()) / 2);
                         String predecessor=hm.get(genHash(emu_id)).get(3);
                         String successor=hm.get(genHash(emu_id)).get(2);
+
+                        String successor1=hm.get(genHash(emu_id)).get(3);
+                        String predecessor1=hm.get(genHash(emu_id)).get(1);
                         if(coordinator.equals("11124")){
                             splcase=true;
                         }
                         sendcoordinatorsdata(successor,predecessor,coordinator,splcase);
+                        sendcoordinatorsdata(successor1,predecessor1,coordinator,splcase);
                     }
                     else if(msg.equals("getreplicatedata")){
                         String coordinator=msgarray[1];
